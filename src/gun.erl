@@ -139,7 +139,9 @@
 	tls_opts => [ssl:tls_client_option()],
 	trace => boolean(),
 	transport => tcp | tls | ssl,
-	ws_opts => ws_opts()
+	ws_opts => ws_opts(),
+	%% For compatibility with Gun 1.x.x
+	transport_opts => [gen_tcp:connect_option()] | [ssl:tls_client_option()]
 }.
 -export_type([opts/0]).
 
@@ -274,10 +276,11 @@ open_unix(SocketPath, Opts) ->
 
 do_open(Host, Port, Opts0) ->
 	%% We accept both ssl and tls but only use tls in the code.
-	Opts = case Opts0 of
+	Opts1 = case Opts0 of
 		#{transport := ssl} -> Opts0#{transport => tls};
 		_ -> Opts0
 	end,
+	Opts = backwards_compatible_transport_opts(Opts1),
 	case check_options(maps:to_list(Opts)) of
 		ok ->
 			Result = case maps:get(supervise, Opts, true) of
@@ -294,6 +297,20 @@ do_open(Host, Port, Opts0) ->
 		CheckError ->
 			CheckError
 	end.
+
+%% Gun 2 removed transport_opts in favor of tls_opts and tcp_opts
+%% We're adding support back for backwards compatibility and translating
+%% the opts here.
+backwards_compatible_transport_opts(#{transport_opts := _} = Opts) ->
+	NewKey = case Opts of
+		#{transport := tls} -> tls_opts;
+		_ -> tcp_opts
+	end,
+	Value = maps:get(transport_opts, Opts),
+	OptsWithNewKey = maps:put(NewKey, Value, Opts),
+	maps:remove(transport_opts, OptsWithNewKey);
+
+backwards_compatible_transport_opts(Opts) -> Opts.
 
 check_options([]) ->
 	ok;
